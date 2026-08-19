@@ -112,7 +112,7 @@ function bigH(x: number, z: number): number {
   h += terraceH(x, z);
   /* river channel */
   const dr = Math.abs(z - riverZ(x));
-  h -= (1 - smooth(clamp((dr - 3.2) / 9, 0, 1))) * 3.6;
+  h -= (1 - smooth(clamp((dr - 2.2) / 4.5, 0, 1))) * 3.6;
   return h;
 }
 
@@ -412,6 +412,23 @@ export class World {
         post.castShadow = true;
         this.scene.add(post);
       }
+    }
+    /* stone piers standing in the riverbed — the bridge is supported, not floating */
+    const stoneM = new THREE.MeshStandardMaterial({ color: 0x8d8577, roughness: 1 });
+    for (const sx of [x0 + 0.35, x1 - 0.35]) {
+      for (const pz of [19.2, 22.8, 26.4]) {
+        const pier = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.32, 3.9, 7), stoneM);
+        pier.position.set(sx, -1.5, pz);
+        pier.castShadow = true;
+        this.scene.add(pier);
+      }
+    }
+    /* abutments where the ramps meet the banks */
+    for (const az of [16.7, 28.9]) {
+      const abut = new THREE.Mesh(new THREE.BoxGeometry(5.6, 1.5, 1.3), stoneM);
+      abut.position.set((x0 + x1) / 2, 0.05, az);
+      abut.castShadow = true;
+      this.scene.add(abut);
     }
   }
 

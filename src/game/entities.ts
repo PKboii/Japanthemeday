@@ -667,37 +667,78 @@ class Dragonfly {
 
 /* cyclist passing behind the shop during the square beat */
 class Cyclist {
-  rig: Rig; bike = new THREE.Group();
+  rig: Rig; bike = new THREE.Group(); crank = new THREE.Group();
   constructor(scene: THREE.Scene) {
     this.rig = makeRig({ shirt: 0x3d5a80, pants: 0x2c2c34, scale: 0.95, hat: "cap" });
     const frameM = std(0x8a4a3c, 0.5);
     const darkM = std(0x2c2c2c, 0.9);
+    /* wheels */
     for (const wx of [-0.62, 0.62]) {
       const w = new THREE.Mesh(new THREE.TorusGeometry(0.34, 0.035, 6, 14), darkM);
       w.position.set(wx, 0.34, 0);
       this.bike.add(w);
     }
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 5), frameM);
-    bar.rotation.z = Math.PI / 2 - 0.2; bar.position.y = 0.55;
-    this.bike.add(bar);
+    /* frame tubes: seat tube, down tube, top tube */
+    const tube = (ax: number, ay: number, bx: number, by: number) => {
+      const len = Math.hypot(bx - ax, by - ay);
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, len, 5), frameM);
+      t.position.set((ax + bx) / 2, (ay + by) / 2, 0);
+      t.rotation.z = Math.atan2(bx - ax, by - ay);
+      this.bike.add(t);
+    };
+    tube(-0.05, 0.38, -0.3, 0.95);   // seat tube
+    tube(-0.05, 0.38, 0.55, 0.85);   // down tube
+    tube(-0.28, 0.9, 0.52, 0.88);    // top tube
+    tube(-0.62, 0.34, -0.05, 0.38);  // chainstay
+    tube(-0.62, 0.34, -0.28, 0.9);   // seatstay
+    tube(0.62, 0.34, 0.55, 0.85);    // fork
+    /* saddle + handlebars */
+    const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.14), darkM);
+    saddle.position.set(-0.3, 0.99, 0);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.28, 5), frameM);
+    stem.position.set(0.55, 0.99, 0);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.52, 5), darkM);
+    grip.rotation.x = Math.PI / 2;
+    grip.position.set(0.55, 1.12, 0);
+    this.bike.add(saddle, stem, grip);
+    /* crank + pedals, spinning in the wheel plane */
+    this.crank.position.set(-0.05, 0.38, 0);
+    const pedalGeo = new THREE.BoxGeometry(0.09, 0.03, 0.16);
+    for (const s of [1, -1]) {
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.3, 4), darkM);
+      arm.position.set(0, s * 0.075, s * 0.1);
+      const pedal = new THREE.Mesh(pedalGeo, darkM);
+      pedal.position.set(0, s * 0.15, s * 0.1);
+      this.crank.add(arm, pedal);
+    }
+    this.bike.add(this.crank);
+    /* wheelbase along the rider's forward axis, saddle under the hips */
+    this.bike.rotation.y = -Math.PI / 2;
+    this.bike.position.z = 0.3;
     this.rig.root.add(this.bike);
-    this.rig.hip.position.y = 1.28;
-    this.rig.legL.rotation.x = -0.5; this.rig.legR.rotation.x = -0.5;
-    this.rig.torso.rotation.x = 0.35;
+    /* seated on the saddle, leaning to the bars */
+    this.rig.hip.position.y = 1.0;
+    this.rig.torso.rotation.x = 0.42;
+    this.rig.armL.rotation.x = -0.72; this.rig.armR.rotation.x = -0.72;
+    this.rig.foreL.rotation.x = -0.35; this.rig.foreR.rotation.x = -0.35;
+    this.rig.legL.rotation.x = -1.25; this.rig.legR.rotation.x = -1.25;
     scene.add(this.rig.root);
   }
   update(dt: number, clock: number) {
     /* rides the square road east→west, visible during the square chapter */
-    const vis = bell(S.t, 0.8, 0.09);
+    const vis = bell(S.t, 0.83, 0.09);
     this.rig.root.visible = vis > 0.01;
     if (!this.rig.root.visible) return;
     const u = ((clock * 0.045) % 1);
     const x = lerp(52, 14, u), z = 32.8;
     this.rig.root.position.set(x, heightAt(x, z), z);
     this.rig.root.rotation.y = -Math.PI / 2;
-    const ph = clock * 8;
-    this.rig.shinL.rotation.x = 0.6 + Math.sin(ph) * 0.5;
-    this.rig.shinR.rotation.x = 0.6 - Math.sin(ph) * 0.5;
+    const ph = clock * 7;
+    this.crank.rotation.z = ph * 1.6;
+    this.rig.legL.rotation.x = -1.25 + Math.sin(ph) * 0.22;
+    this.rig.legR.rotation.x = -1.25 - Math.sin(ph) * 0.22;
+    this.rig.shinL.rotation.x = 0.95 - Math.sin(ph) * 0.18;
+    this.rig.shinR.rotation.x = 0.95 + Math.sin(ph) * 0.18;
   }
 }
 

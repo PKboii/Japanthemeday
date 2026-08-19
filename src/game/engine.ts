@@ -33,7 +33,7 @@ interface Key { t: number; pos: [number, number, number]; look: [number, number,
 const KEYS: Key[] = [
   { t: 0.000, pos: [-20, 82, 128], look: [14, 2, -8], fov: 38 },         // establishing aerial
   { t: 0.055, pos: [-46, 52, 84], look: [-26, 4, -18], fov: 40 },        // descending
-  { t: 0.100, pos: [-64, 10, 10], look: [-70, 2.4, -34], fov: 46 },      // low approach
+  { t: 0.100, pos: [-54, 6, -2], look: [-70, 2.4, -34], fov: 46 },       // low approach — blossoms sweep the frame edge
   { t: 0.128, pos: [-67, 4.4, -5], look: [-71, 2, -26], fov: 48 },       // blossom wipe
   { t: 0.170, pos: [-72, 2.5, -44], look: [-80, 1.4, -52], fov: 50 },    // the boy at his gate
   { t: 0.210, pos: [-73.6, 2.3, -49.6], look: [-60, 1.4, -47], fov: 50 },// follow the road
@@ -49,8 +49,8 @@ const KEYS: Key[] = [
   { t: 0.705, pos: [27.5, 2.6, 22.5], look: [35, 1.3, 22], fov: 50 },    // bridge, low side angle
   { t: 0.745, pos: [33, 2.4, 30], look: [39, 1.7, 41], fov: 50 },        // shop ahead over shoulder
   { t: 0.785, pos: [35.5, 2.1, 44], look: [42.5, 1.6, 39.2], fov: 47 },  // Miyo bows
-  { t: 0.830, pos: [24.5, 3.6, 53], look: [36, 1.4, 44], fov: 54 },      // square — wide, parallax
-  { t: 0.875, pos: [29, 3, 50], look: [40, 2.4, 57], fov: 50 },          // leaving for the hill
+  { t: 0.830, pos: [26, 2.8, 49.5], look: [37.5, 1.4, 42.5], fov: 54 },  // square — wide, parallax
+  { t: 0.875, pos: [28.5, 3, 46.5], look: [40, 2.4, 57], fov: 50 },      // leaving for the hill
   { t: 0.915, pos: [39.5, 3, 56.5], look: [51, 7, 65], fov: 48 },        // the climb
   { t: 0.945, pos: [46, 7.5, 60], look: [56, 8.6, 70], fov: 47 },
   { t: 0.975, pos: [50.5, 10.2, 62.5], look: [58, 8.8, 74], fov: 45 },   // summit orbit begins
@@ -195,8 +195,8 @@ export class Engine {
     if (this.tmpPos.y < minY) this.tmpPos.y = minY;
 
     /* the camera is a physical object: it may never travel through a trunk,
-       a canopy or a wall (disabled only during the intentional blossom wipe) */
-    if (S.t > 0.16) {
+       a canopy, a wall — or a villager */
+    {
       const cast = this.ent.getColliders();
       for (let pass = 0; pass < 2; pass++) {
         for (let ci = 0; ci < this.world.colliders.length + cast.length; ci++) {
