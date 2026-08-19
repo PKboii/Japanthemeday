@@ -15,52 +15,54 @@ interface Hooks {
 }
 
 export const CAPTIONS: [number, number, string, string][] = [
-  [0.155, 0.195, "朝", "A morning road"],
-  [0.218, 0.262, "花", "Haru's flowers"],
-  [0.330, 0.425, "桜", "Cherry-blossom lane"],
-  [0.452, 0.505, "風", "A breath of wind"],
-  [0.515, 0.555, "田", "The paddies wake"],
-  [0.600, 0.645, "橋", "Crossing the river"],
-  [0.700, 0.742, "店", "The little shop"],
-  [0.762, 0.815, "広場", "Village square"],
-  [0.893, 0.935, "丘", "The hill above"],
+  [0.04, 0.13, "日", "The village wakes"],
+  [0.16, 0.25, "道", "A morning road"],
+  [0.28, 0.345, "花", "Haru's flowers"],
+  [0.385, 0.435, "輪", "The craftsman"],
+  [0.455, 0.55, "桜", "Cherry-blossom lane"],
+  [0.575, 0.65, "田", "The paddies wake"],
+  [0.685, 0.735, "橋", "Crossing the river"],
+  [0.755, 0.815, "店", "The little shop"],
+  [0.82, 0.885, "広場", "Village square"],
+  [0.90, 0.95, "丘", "The hill above"],
   [0.962, 1.001, "森", "A quiet morning in Hinomori"],
 ];
 
 /* ---------------- camera choreography ---------------- */
 interface Key { t: number; pos: [number, number, number]; look: [number, number, number]; fov: number }
 const KEYS: Key[] = [
-  { t: 0.000, pos: [-20, 82, 128], look: [14, 2, -8], fov: 38 },        // establishing aerial
-  { t: 0.055, pos: [-46, 52, 84], look: [-26, 4, -18], fov: 40 },       // descending
-  { t: 0.100, pos: [-64, 10, 10], look: [-70, 2.4, -34], fov: 46 },     // low approach
-  { t: 0.128, pos: [-67, 4.4, -5], look: [-71, 2, -26], fov: 48 },      // blossom wipe
-  { t: 0.160, pos: [-79, 2.6, -56.5], look: [-66, 1.4, -44], fov: 50 }, // the boy at his gate
-  { t: 0.195, pos: [-50, 2.3, -38.5], look: [-38, 1.4, -33], fov: 50 }, // follow the road
-  { t: 0.230, pos: [-33.5, 2.2, -28.5], look: [-38.5, 1.4, -31], fov: 48 },   // Haru
-  { t: 0.275, pos: [-12.5, 2.2, -15.5], look: [-11.5, 1.35, -26], fov: 49 }, // Gen the repairman
-  { t: 0.330, pos: [-16, 2.4, -10], look: [-2, 1.6, -20], fov: 50 },    // enter the lane
-  { t: 0.400, pos: [3, 2.1, -14.5], look: [19, 1.6, -5], fov: 51 },     // side-track under blossoms
-  { t: 0.455, pos: [21, 2.3, -1.5], look: [16.5, 4.2, -8], fov: 50 },   // gust — tilt up into canopy
-  { t: 0.505, pos: [43, 5.6, -1], look: [13, 1.2, -22], fov: 46 },      // paddy reveal
-  { t: 0.570, pos: [27, 2.3, 25], look: [40, 1.5, 14.5], fov: 50 },     // the farmer at the channel
-  { t: 0.605, pos: [42, 2.4, 22], look: [33, 1.8, 21.5], fov: 50 },     // bridge, side angle
-  { t: 0.655, pos: [38.5, 2.3, 26.5], look: [34, 1.5, 35], fov: 50 },   // toward the shop
-  { t: 0.695, pos: [31, 2.3, 46], look: [40, 1.8, 40], fov: 50 },       // shop ahead over shoulder
-  { t: 0.725, pos: [40.5, 2.1, 42.2], look: [44.2, 1.6, 40.6], fov: 47 }, // Miyo bows (close)
-  { t: 0.775, pos: [27, 3.4, 50.5], look: [35, 1.5, 43], fov: 53 },     // square — wide, parallax
-  { t: 0.830, pos: [31.5, 3, 47.5], look: [42, 2.5, 56], fov: 50 },     // leaving for the hill
-  { t: 0.895, pos: [45.5, 5.8, 59], look: [53, 7.5, 68], fov: 48 },     // the climb
-  { t: 0.945, pos: [67, 10, 82], look: [44, 5, 26], fov: 44 },          // orbit past him — reveal
-  { t: 1.000, pos: [-10, 66, 130], look: [16, 2, 0], fov: 37 },         // grand pull-back
+  { t: 0.000, pos: [-20, 82, 128], look: [14, 2, -8], fov: 38 },         // establishing aerial
+  { t: 0.055, pos: [-46, 52, 84], look: [-26, 4, -18], fov: 40 },        // descending
+  { t: 0.100, pos: [-64, 10, 10], look: [-70, 2.4, -34], fov: 46 },      // low approach
+  { t: 0.128, pos: [-67, 4.4, -5], look: [-71, 2, -26], fov: 48 },       // blossom wipe
+  { t: 0.170, pos: [-72, 2.5, -44], look: [-80, 1.4, -52], fov: 50 },    // the boy at his gate
+  { t: 0.210, pos: [-73.6, 2.3, -49.6], look: [-60, 1.4, -47], fov: 50 },// follow the road
+  { t: 0.260, pos: [-54.6, 2.3, -43.7], look: [-43, 1.4, -37], fov: 50 },
+  { t: 0.300, pos: [-33, 2.1, -24], look: [-41, 1.4, -30.5], fov: 48 },  // Haru
+  { t: 0.345, pos: [-32.2, 2.2, -31.1], look: [-20, 1.4, -26], fov: 50 },
+  { t: 0.400, pos: [-14, 2.1, -15], look: [-11, 1.3, -26], fov: 49 },    // Gen the repairman
+  { t: 0.450, pos: [-2.7, 2.3, -16.3], look: [10, 1.5, -11], fov: 50 },  // enter the lane
+  { t: 0.520, pos: [8.5, 2.2, -3.5], look: [17, 3.4, -9.5], fov: 50 },   // gust — tilt up into canopy
+  { t: 0.575, pos: [16, 5, -1.5], look: [24, 1.2, -26], fov: 46 },       // paddy reveal
+  { t: 0.630, pos: [28.5, 2.3, 4.2], look: [32, 1.6, 15], fov: 50 },     // toward the bridge
+  { t: 0.665, pos: [26.5, 2.3, 13], look: [36, 1.5, 14], fov: 50 },      // the farmer
+  { t: 0.705, pos: [27.5, 2.6, 22.5], look: [35, 1.3, 22], fov: 50 },    // bridge, low side angle
+  { t: 0.745, pos: [33, 2.4, 30], look: [39, 1.7, 41], fov: 50 },        // shop ahead over shoulder
+  { t: 0.785, pos: [35.5, 2.1, 44], look: [42.5, 1.6, 39.2], fov: 47 },  // Miyo bows
+  { t: 0.830, pos: [24.5, 3.6, 53], look: [36, 1.4, 44], fov: 54 },      // square — wide, parallax
+  { t: 0.875, pos: [29, 3, 50], look: [40, 2.4, 57], fov: 50 },          // leaving for the hill
+  { t: 0.915, pos: [39.5, 3, 56.5], look: [51, 7, 65], fov: 48 },        // the climb
+  { t: 0.945, pos: [46, 7.5, 60], look: [56, 8.6, 70], fov: 47 },
+  { t: 0.975, pos: [50.5, 10.2, 62.5], look: [58, 8.8, 74], fov: 45 },   // summit orbit begins
+  { t: 1.000, pos: [-10, 66, 130], look: [16, 2, 0], fov: 37 },          // grand pull-back
 ];
 
 /* scroll → boy's arc-length position on the route (monotonic; plateaus = beats) */
 const BOY_MAP: [number, number][] = [
-  [0, 0], [0.115, 0], [0.155, 0.015], [0.21, 0.222], [0.255, 0.222],
-  [0.27, 0.36], [0.305, 0.36], [0.44, 0.507], [0.505, 0.507],
-  [0.545, 0.62], [0.575, 0.683], [0.60, 0.683], [0.65, 0.73],
-  [0.69, 0.76], [0.705, 0.779], [0.735, 0.779], [0.80, 0.83],
-  [0.86, 0.88], [0.93, 0.965], [1, 1],
+  [0, 0], [0.175, 0], [0.24, 0.10], [0.30, 0.219], [0.345, 0.28],
+  [0.40, 0.357], [0.445, 0.44], [0.50, 0.50], [0.565, 0.505],
+  [0.63, 0.63], [0.665, 0.655], [0.71, 0.705], [0.76, 0.776],
+  [0.815, 0.782], [0.86, 0.845], [0.93, 0.93], [1, 1],
 ];
 
 export class Engine {
@@ -183,7 +185,7 @@ export class Engine {
     S.raw = this.readScroll();
     S.t = lerp(S.t, S.raw, 1 - Math.exp(-3.6 * dt));
     if (Math.abs(S.t - S.raw) < 0.0004) S.t = S.raw;
-    S.gust = bell(S.t, 0.477, 0.034);
+    S.gust = bell(S.t, 0.52, 0.03);
 
     const boyT = piecewise(BOY_MAP, S.t);
 
@@ -192,7 +194,29 @@ export class Engine {
     const minY = heightAt(this.tmpPos.x, this.tmpPos.z) + 0.9;
     if (this.tmpPos.y < minY) this.tmpPos.y = minY;
 
-    const par = S.parallax * (0.55 + bell(S.t, 0.785, 0.07) * 1.7 + bell(S.t, 0.97, 0.05) * 1.2);
+    /* the camera is a physical object: it may never travel through a trunk,
+       a canopy or a wall (disabled only during the intentional blossom wipe) */
+    if (S.t > 0.16) {
+      for (let pass = 0; pass < 2; pass++) {
+        for (const c of this.world.colliders) {
+          const dx = this.tmpPos.x - c.x, dy = this.tmpPos.y - c.y, dz = this.tmpPos.z - c.z;
+          const rr = c.r + 0.7;
+          if (Math.abs(dx) > rr || Math.abs(dy) > rr || Math.abs(dz) > rr) continue;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < rr * rr) {
+            const d = Math.sqrt(Math.max(d2, 1e-6));
+            const push = (rr - d) / d;
+            this.tmpPos.x += dx * push;
+            this.tmpPos.y += dy * push;
+            this.tmpPos.z += dz * push;
+          }
+        }
+      }
+      const minY2 = heightAt(this.tmpPos.x, this.tmpPos.z) + 0.7;
+      if (this.tmpPos.y < minY2) this.tmpPos.y = minY2;
+    }
+
+    const par = S.parallax * (0.55 + bell(S.t, 0.83, 0.07) * 1.7 + bell(S.t, 0.97, 0.05) * 1.2);
     const dir = new THREE.Vector3().subVectors(this.tmpLook, this.tmpPos).normalize();
     const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
     this.tmpLook.addScaledVector(right, -S.mx * par * 2.2);

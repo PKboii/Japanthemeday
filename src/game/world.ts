@@ -45,7 +45,7 @@ function fbm(x: number, z: number): number {
 export const ROUTE: [number, number][] = [
   [-78.5, -50.5], [-60, -47], [-47, -39], [-40, -34], [-32, -31], [-20, -26],
   [-8, -19], [6, -12], [18, -7], [27, -1], [29, 6], [31, 13],
-  [34, 18.5], [34, 25.5], [35, 31], [35, 38], [33.5, 44], [34, 49],
+  [34, 18.5], [34, 25.5], [35, 31], [39, 40], [37, 45], [34, 49],
   [40, 55], [48, 62], [55, 69], [59, 73.8],
 ];
 
@@ -157,10 +157,13 @@ interface Bldg {
   chimney?: boolean; engawa?: boolean; windows?: number; door?: boolean;
 }
 
+export interface Collider { x: number; y: number; z: number; r: number }
+
 export class World {
   scene: THREE.Scene;
   cherrySpots: [number, number, number, number][] = [];
   smokeSpots: [number, number, number][] = [];
+  colliders: Collider[] = [];
   pathCurve: THREE.CatmullRomCurve3;
 
   private canopies: { m: THREE.Object3D; ph: number; amp: number }[] = [];
@@ -650,6 +653,8 @@ export class World {
         .applyMatrix4(new THREE.Matrix4().makeRotationY(ry));
       this.smokeSpots.push([x + wp.x, g.position.y + wp.y, z + wp.z]);
     }
+    /* camera collider — walls are solid */
+    this.colliders.push({ x, y: heightAt(x, z) + o.h * 0.5, z, r: Math.max(o.w, o.d) * 0.62 });
     this.scene.add(g);
     return g;
   }
@@ -718,10 +723,10 @@ export class World {
       }
     }
 
-    /* 5 — the bicycle shop: open front, workbench, spare wheels */
-    this.building(-13, -31.5, -2.3, { w: 7.4, d: 5.6, h: 3, roofH: 1.7, wall: 0xb8a98c, roof: 0x424c58, sign: "自転車", noren: "輪", norenColor: 0x39506b, door: false, windows: 1 });
-    this.bike(-10.2, -28.4, -2.3 + Math.PI / 2);
-    this.bike(-8.8, -29.6, -2.3 + Math.PI / 2 + 0.15);
+    /* 5 — the bicycle shop: open front facing the road, workbench, spare wheels */
+    this.building(-13, -31.5, 0.23, { w: 7.4, d: 5.6, h: 3, roofH: 1.7, wall: 0xb8a98c, roof: 0x424c58, sign: "自転車", noren: "輪", norenColor: 0x39506b, door: false, windows: 1 });
+    this.bike(-10.2, -28.4, 0.23 + Math.PI / 2);
+    this.bike(-8.8, -29.6, 0.23 + Math.PI / 2 + 0.15);
     for (const [wx, wz] of [[-15.6, -28.6], [-15.2, -29.6]] as [number, number][]) {
       const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.33, 0.03, 6, 14),
         new THREE.MeshStandardMaterial({ color: 0x2c2c2c }));
@@ -750,8 +755,8 @@ export class World {
     awn.position.set(0, 2.6, 4.2);
     awn.rotation.x = 0.22;
     shop.add(awn);
-    /* crates + produce + flower buckets by the door */
-    for (const [cx, cz, cc] of [[42.6, 39.2, 0xd97e2f], [42.2, 40.6, 0x8fb75c], [43.4, 42.4, 0xc2472f]] as [number, number, number][]) {
+    /* crates + produce + flower buckets by the door (clear of Miyo) */
+    for (const [cx, cz, cc] of [[43.5, 38.2, 0xd97e2f], [43.2, 39.9, 0x8fb75c], [44.1, 41.7, 0xc2472f]] as [number, number, number][]) {
       this.box(0.8, 0.5, 0.8, 0x8a6f4d, cx, heightAt(cx, cz) + 0.25, cz, { ry: Math.random() });
       for (let i = 0; i < 4; i++) {
         const pr = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 5),
@@ -832,16 +837,16 @@ export class World {
     paper.rotation.y = -0.7 + Math.PI;
     this.scene.add(paper);
 
-    /* benches */
+    /* benches — the elders' bench west of the well, one more by the shop road */
     this.bench(27.5, 41.5, 0.5);
-    this.bench(39, 42.5, -1.2);
+    this.bench(40.5, 36, -1.2);
 
-    /* planter Nana tends */
-    this.box(2.6, 0.5, 0.9, 0x8a6f4d, 31, heightAt(31, 49.6) + 0.25, 49.6, { ry: 0.2 });
+    /* planter Nana tends (west of the path so the boy never clips it) */
+    this.box(2.6, 0.5, 0.9, 0x8a6f4d, 29.5, heightAt(29.5, 50.5) + 0.25, 50.5, { ry: 0.35 });
     for (let i = 0; i < 7; i++) {
       const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0),
         new THREE.MeshLambertMaterial({ color: i % 2 ? 0xf2b8c6 : 0xf6e08a }));
-      f.position.set(29.9 + i * 0.36, heightAt(31, 49.6) + 0.62, 49.5 + Math.sin(i) * 0.12);
+      f.position.set(28.4 + i * 0.36, heightAt(29.5, 50.5) + 0.62, 50.4 + Math.sin(i) * 0.12);
       this.scene.add(f);
     }
 
@@ -931,7 +936,10 @@ export class World {
       blob.castShadow = true;
       g.add(blob);
       this.canopies.push({ m: blob, ph: x * 0.7 + i * 1.3, amp: kind === "pine" ? 0.012 : 0.03 });
+      /* camera colliders — the view must never travel through foliage */
+      this.colliders.push({ x: x + bx, y: y + by, z: z + bz, r: r * 0.94 });
     }
+    this.colliders.push({ x, y: y + 1.2 * s, z, r: 0.5 * s });
     this.scene.add(g);
     if (register && kind === "cherry") {
       this.cherrySpots.push([x, y + 3.3 * s, z, maxR * 1.25]);
@@ -949,12 +957,14 @@ export class World {
     this.heroBranch = branch;
     this.canopies.push({ m: branch, ph: 2, amp: 0.04 });
     this.cherrySpots.push([-70.5, 3.6, -7.5, 2.6]);
+    this.colliders.push({ x: -70.5, y: 3.6, z: -7.5, r: 2.4 });
     hero.rotation.y = 0.7;
 
-    /* cherry lane — alternating sides, varied sizes */
+    /* cherry lane — alternating sides, kept clear of the road centreline
+       and of the camera corridor that tracks the boy from the south */
     const lane: [number, number, number][] = [
-      [-14, -24.5, 1.25], [-4, -17.8, 1.0], [7, -13.6, 1.35], [15.5, -8.6, 1.05], [23.5, -3.2, 1.2],
-      [-9.5, -14.5, 0.95], [2.5, -9.8, 1.15], [12.5, -4.2, 0.9], [21, 1.8, 1.1], [27.5, 4.5, 0.95],
+      [-14, -24.5, 1.25], [-6, -20.5, 1.0], [6.5, -15.5, 1.35], [19, -11, 1.3], [25.5, -5, 1.2],
+      [-1, -11, 1.15], [11, -6.5, 0.9], [23.5, 1.5, 1.1], [35, 9, 0.95],
     ];
     for (const [x, z, s] of lane) this.tree(x, z, "cherry", s);
 
@@ -962,11 +972,11 @@ export class World {
     this.tree(-76, -45, "cherry", 1.0);
     this.tree(26, 33.5, "cherry", 1.15);
     this.tree(44.5, 47.5, "cherry", 1.05);
-    this.tree(44, 19.5, "cherry", 1.3);
+    this.tree(45, 14, "cherry", 1.3);
     this.tree(50, 60, "cherry", 1.1);
 
     /* leaf trees scattered */
-    for (const [x, z] of [[-50, -40], [-20, -44], [10, -30], [-34, 34], [18, 42], [30, 55], [42, 34], [-66, -30], [8, 8], [52, 44]] as [number, number][]) {
+    for (const [x, z] of [[-60, -38], [-20, -44], [10, -30], [-34, 34], [18, 42], [30, 55], [42, 34], [-66, -30], [8, 8], [52, 44]] as [number, number][]) {
       this.tree(x + (hash2(x, z) - 0.5) * 3, z + (hash2(z, x) - 0.5) * 3, "leaf", 0.85 + hash2(x, z + 1) * 0.45);
     }
     /* pines on the north hills & viewpoint slope */

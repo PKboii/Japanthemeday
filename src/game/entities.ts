@@ -20,69 +20,124 @@ function std(color: number, rough = 0.85): THREE.MeshStandardMaterial {
 
 export interface RigOpts {
   shirt: number; pants: number; skin?: number; scale?: number;
-  hat?: "straw" | "cap" | "none"; hair?: number; female?: boolean; elder?: boolean;
+  hat?: "straw" | "cap" | "none"; hair?: number; female?: boolean; elder?: boolean; shorts?: boolean;
 }
 
 export function makeRig(o: RigOpts): Rig {
   const s = o.scale ?? 1;
   const skin = o.skin ?? 0xf0c8a0;
+  const hairCol = o.elder ? 0xcfcabf : (o.hair ?? 0x2c2620);
   const root = new THREE.Group();
   const hip = new THREE.Group(); hip.position.y = 0.95 * s; root.add(hip);
 
-  const mk = (parent: THREE.Object3D, w: number, h: number, d: number, mat: THREE.Material, y: number) => {
+  /* pivot group with a rounded capsule limb hanging below it */
+  const limb = (parent: THREE.Object3D, r: number, len: number, mat: THREE.Material,
+    px: number, py: number, pz: number): THREE.Group => {
     const g = new THREE.Group();
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    mesh.position.y = y; mesh.castShadow = true;
-    g.add(mesh);
+    g.position.set(px * s, py * s, pz * s);
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r * s, len * s, 5, 10), mat);
+    m.position.y = -(len / 2 + r * 0.35) * s;
+    m.castShadow = true;
+    g.add(m);
     parent.add(g);
     return g;
   };
 
-  mk(hip, 0.34 * s, 0.2 * s, 0.22 * s, std(o.pants), 0);
-  const torso = mk(hip, 0.42 * s, 0.55 * s, 0.26 * s, std(o.shirt), 0.36 * s);
+  /* pelvis */
+  const pelvis = new THREE.Mesh(new THREE.CapsuleGeometry(0.145 * s, 0.1 * s, 5, 10), std(o.pants));
+  pelvis.position.y = 0.02 * s; pelvis.castShadow = true;
+  hip.add(pelvis);
+  /* torso */
+  const torso = new THREE.Group(); torso.position.y = 0.05 * s; hip.add(torso);
+  const chest = new THREE.Mesh(new THREE.CapsuleGeometry(0.155 * s, 0.3 * s, 6, 12), std(o.shirt));
+  chest.position.y = 0.33 * s; chest.castShadow = true;
+  torso.add(chest);
   if (o.female) {
-    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * s, 0.28 * s, 0.4 * s, 8), std(o.shirt));
-    skirt.position.y = -0.16 * s; hip.add(skirt);
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.15 * s, 0.27 * s, 0.36 * s, 10), std(o.shirt));
+    skirt.position.y = -0.12 * s; skirt.castShadow = true; hip.add(skirt);
   }
-  const head = mk(torso, 0.27 * s, 0.28 * s, 0.26 * s, std(skin, 0.7), 0.44 * s);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.155 * s, 10, 8),
-    std(o.elder ? 0xcfcabf : (o.hair ?? 0x2c2620), 0.9));
-  hair.scale.set(1, 0.9, 1);
-  hair.position.set(0, 0.055 * s, -0.012 * s);
-  head.add(hair);
+  torso.userData.stoop = o.elder ? 0.1 : 0; /* gentle stoop, preserved by animations */
+  torso.rotation.x = torso.userData.stoop as number;
+
+  /* neck + head */
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * s, 0.05 * s, 0.1 * s, 8), std(skin, 0.7));
+  neck.position.y = 0.6 * s;
+  torso.add(neck);
+  const head = new THREE.Group(); head.position.y = 0.62 * s; torso.add(head);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.145 * s, 16, 12), std(skin, 0.65));
+  skull.scale.set(0.95, 1.08, 0.98);
+  skull.position.y = 0.12 * s; skull.castShadow = true;
+  head.add(skull);
+  /* hair — a cap over the crown, face stays open */
+  const hairM = std(hairCol, 0.95);
+  const capHair = new THREE.Mesh(new THREE.SphereGeometry(0.152 * s, 14, 10), hairM);
+  capHair.scale.set(1.0, 0.92, 1.02);
+  capHair.position.set(0, 0.165 * s, -0.028 * s);
+  head.add(capHair);
+  if (o.female) {
+    const bun = new THREE.Mesh(new THREE.SphereGeometry(0.062 * s, 10, 8), hairM);
+    bun.position.set(0, 0.24 * s, -0.1 * s);
+    head.add(bun);
+    for (const sx of [-1, 1]) {
+      const tuft = new THREE.Mesh(new THREE.SphereGeometry(0.05 * s, 8, 6), hairM);
+      tuft.scale.set(0.7, 1.3, 0.9);
+      tuft.position.set(sx * 0.125 * s, 0.07 * s, 0.015 * s);
+      head.add(tuft);
+    }
+  } else if (!o.hat || o.hat === "none") {
+    for (const [tx, tz] of [[0, 0.02], [-0.06, -0.01], [0.06, -0.01]] as [number, number][]) {
+      const spike = new THREE.Mesh(new THREE.SphereGeometry(0.048 * s, 8, 6), hairM);
+      spike.position.set(tx * s, 0.27 * s, tz * s);
+      head.add(spike);
+    }
+  }
+  /* face */
+  const eyeM = std(0x241d18, 0.4);
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.016 * s, 6, 5), eyeM);
+    eye.position.set(sx * 0.05 * s, 0.125 * s, 0.128 * s);
+    head.add(eye);
+  }
   if (o.hat === "straw") {
     const brim = new THREE.Mesh(new THREE.ConeGeometry(0.32 * s, 0.13 * s, 12), std(0xd9c07a, 1));
-    brim.position.y = 0.17 * s;
+    brim.position.y = 0.26 * s;
     const top = new THREE.Mesh(new THREE.ConeGeometry(0.17 * s, 0.12 * s, 12), std(0xcbb26e, 1));
-    top.position.y = 0.25 * s;
+    top.position.y = 0.33 * s;
     head.add(brim, top);
   }
   if (o.hat === "cap") {
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.16 * s, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), std(0x39506b));
-    cap.position.y = 0.09 * s;
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.03 * s, 0.14 * s), std(0x39506b));
-    visor.position.set(0, 0.09 * s, 0.17 * s);
-    head.add(cap, visor);
+    const capG = new THREE.Mesh(new THREE.SphereGeometry(0.155 * s, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), std(0x39506b));
+    capG.position.y = 0.17 * s;
+    const visor = new THREE.Mesh(new THREE.CylinderGeometry(0.16 * s, 0.16 * s, 0.02 * s, 10, 1, false, -0.9, 1.8), std(0x39506b));
+    visor.position.set(0, 0.175 * s, 0.06 * s);
+    head.add(capG, visor);
   }
-  const armL = mk(torso, 0.12 * s, 0.34 * s, 0.14 * s, std(o.shirt), -0.16 * s);
-  armL.position.set(-0.27 * s, 0.24 * s, 0);
-  const armR = mk(torso, 0.12 * s, 0.34 * s, 0.14 * s, std(o.shirt), -0.16 * s);
-  armR.position.set(0.27 * s, 0.24 * s, 0);
-  const foreL = mk(armL, 0.1 * s, 0.28 * s, 0.12 * s, std(skin, 0.7), -0.26 * s);
-  foreL.position.y = -0.3 * s;
-  const foreR = mk(armR, 0.1 * s, 0.28 * s, 0.12 * s, std(skin, 0.7), -0.26 * s);
-  foreR.position.y = -0.3 * s;
-  const legL = mk(hip, 0.15 * s, 0.42 * s, 0.17 * s, std(o.pants), -0.2 * s);
-  legL.position.set(-0.11 * s, -0.03 * s, 0);
-  const legR = mk(hip, 0.15 * s, 0.42 * s, 0.17 * s, std(o.pants), -0.2 * s);
-  legR.position.set(0.11 * s, -0.03 * s, 0);
-  const shinL = mk(legL, 0.13 * s, 0.38 * s, 0.15 * s, std(o.pants), -0.18 * s);
-  shinL.position.y = -0.4 * s;
-  const shinR = mk(legR, 0.13 * s, 0.38 * s, 0.15 * s, std(o.pants), -0.18 * s);
-  shinR.position.y = -0.4 * s;
-  const footL = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.08 * s, 0.24 * s), std(0x3a352c));
-  footL.position.set(0, -0.4 * s, 0.04 * s); shinL.add(footL);
-  const footR = footL.clone(); shinR.add(footR);
+
+  /* arms: shoulder → elbow → hand */
+  const armL = limb(torso, 0.05, 0.2, std(o.shirt), -0.225, 0.52, 0);
+  const armR = limb(torso, 0.05, 0.2, std(o.shirt), 0.225, 0.52, 0);
+  const foreL = limb(armL, 0.043, 0.17, std(skin, 0.7), 0, -0.3, 0);
+  const foreR = limb(armR, 0.043, 0.17, std(skin, 0.7), 0, -0.3, 0);
+  for (const f of [foreL, foreR]) {
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05 * s, 8, 6), std(skin, 0.7));
+    hand.position.y = -0.26 * s;
+    f.add(hand);
+  }
+
+  /* legs: hip → knee → rounded foot */
+  const shinMat = std(o.shorts ? skin : o.pants);
+  const legL = limb(hip, 0.075, 0.26, std(o.pants), -0.095, -0.02, 0);
+  const legR = limb(hip, 0.075, 0.26, std(o.pants), 0.095, -0.02, 0);
+  const shinL = limb(legL, 0.058, 0.26, shinMat, 0, -0.42, 0);
+  const shinR = limb(legR, 0.058, 0.26, shinMat, 0, -0.42, 0);
+  const shoeM = std(0x3a352c, 0.8);
+  for (const sh of [shinL, shinR]) {
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.062 * s, 8, 6), shoeM);
+    foot.scale.set(0.85, 0.55, 1.5);
+    foot.position.set(0, -0.42 * s, 0.04 * s);
+    foot.castShadow = true;
+    sh.add(foot);
+  }
 
   root.traverse((c) => { if ((c as THREE.Mesh).isMesh) { c.castShadow = true; } });
   return { root, hip, torso, head, armL, armR, legL, legR, foreL, foreR, shinL, shinR };
@@ -226,10 +281,10 @@ export class Boy {
 
   constructor(scene: THREE.Scene, world: World) {
     this.world = world;
-    this.rig = makeRig({ shirt: 0x4e6e9e, pants: 0x43484f, scale: 0.82, hat: "none", hair: 0x241f1a });
+    this.rig = makeRig({ shirt: 0x4e6e9e, pants: 0x8a7a5a, scale: 0.82, hat: "none", hair: 0x241f1a, shorts: true });
     /* little backpack */
-    const pack = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.14), std(0xb23a24));
-    pack.position.set(0, 0.36, -0.2);
+    const pack = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.16, 4, 8), std(0xb23a24));
+    pack.position.set(0, 0.34, -0.19);
     this.rig.torso.add(pack);
     scene.add(this.rig.root);
   }
@@ -264,10 +319,10 @@ export class Boy {
     const breathe = Math.sin(clock * 1.9) * 0.02;
 
     /* cues, scrubbable */
-    const waveW = bell(S.t, 0.234, 0.016);
-    const nodW = bell(S.t, 0.283, 0.011);
-    const bowW = bell(S.t, 0.72, 0.013);
-    const lookUpW = bell(S.t, 0.477, 0.02);
+    const waveW = bell(S.t, 0.305, 0.018);
+    const nodW = Math.max(bell(S.t, 0.403, 0.011), bell(S.t, 0.668, 0.012));
+    const bowW = bell(S.t, 0.785, 0.015);
+    const lookUpW = bell(S.t, 0.515, 0.022);
 
     r.legL.rotation.x = swing;
     r.legR.rotation.x = -swing;
@@ -317,8 +372,9 @@ export class Villager {
   update(dt: number, clock: number, cue: Cue, boyPos: THREE.Vector3) {
     const r = this.rig;
     const p = this.phase + clock;
+    const stoop = (r.torso.userData.stoop as number) ?? 0;
     const breathe = Math.sin(p * 1.7) * 0.02;
-    r.torso.rotation.x = breathe;
+    r.torso.rotation.x = stoop + breathe;
     r.head.rotation.x = breathe * 0.5;
     r.armL.rotation.x = 0; r.armR.rotation.x = 0;
     r.armL.rotation.z = 0.04; r.armR.rotation.z = -0.04;
@@ -437,6 +493,7 @@ class SeatedPair {
     for (const [rig, off] of [[this.a, -0.45], [this.b, 0.45]] as [Rig, number][]) {
       rig.root.position.set(x + Math.cos(yaw) * off, heightAt(x, z) + 0.02, z - Math.sin(yaw) * off);
       rig.root.rotation.y = yaw + Math.PI;
+      rig.hip.position.y = 0.58; /* seated on the bench */
       sitPose(rig);
       scene.add(rig.root);
     }
@@ -635,7 +692,7 @@ class Cyclist {
     this.rig.root.visible = vis > 0.01;
     if (!this.rig.root.visible) return;
     const u = ((clock * 0.045) % 1);
-    const x = lerp(52, 14, u), z = 36.8;
+    const x = lerp(52, 14, u), z = 32.8;
     this.rig.root.position.set(x, heightAt(x, z), z);
     this.rig.root.rotation.y = -Math.PI / 2;
     const ph = clock * 8;
@@ -662,15 +719,18 @@ export class Entities {
 
     this.haru = new Villager(scene, -37.6, -29.6, 3.5, "water", { shirt: 0xb8685a, pants: 0x4a4a52, female: true, elder: true });
     const can = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.3, 8), std(0x708090, 0.5));
-    can.position.y = -0.5;
+    can.position.y = -0.42;
     this.haru.rig.foreR.add(can);
-    this.gen = new Villager(scene, -11.4, -29.3, 2.5, "repair", { shirt: 0x708090, pants: 0x3d3a30, hat: "cap" });
-    this.kosaku = new Villager(scene, 37.2, 17, -1.45, "basket", { shirt: 0x8a6f4d, pants: 0x37413c, hat: "straw" });
+    /* Gen works at the open front of the bicycle shop, road-side */
+    this.gen = new Villager(scene, -11.4, -27.35, -2.77, "repair", { shirt: 0x708090, pants: 0x3d3a30, hat: "cap" });
+    /* Kōsaku rests his basket by the paddy path, clear of the river */
+    this.kosaku = new Villager(scene, 37.5, 13, -1.57, "basket", { shirt: 0x8a6f4d, pants: 0x37413c, hat: "straw" });
     const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.22, 0.34, 8), std(0xc9a86a, 1));
-    basket.position.y = -0.62;
+    basket.position.y = -0.5;
     this.kosaku.rig.foreL.add(basket);
-    this.miyo = new Villager(scene, 43.3, 39.6, -1.9 + Math.PI, "shopkeep", { shirt: 0x41604a, pants: 0x3d3a30, female: true });
-    this.nana = new Villager(scene, 31.9, 48.6, 2.9, "tend", { shirt: 0x9db8d2, pants: 0x4a4a52, female: true });
+    /* Miyo stands under the shop awning, facing the road */
+    this.miyo = new Villager(scene, 41.6, 38.9, -1.5, "shopkeep", { shirt: 0x41604a, pants: 0x3d3a30, female: true });
+    this.nana = new Villager(scene, 30.4, 49.5, -0.73, "tend", { shirt: 0x9db8d2, pants: 0x4a4a52, female: true });
     const can2 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.26, 8), std(0xb23a24, 0.5));
     can2.position.y = -0.46;
     this.nana.rig.foreR.add(can2);
@@ -679,7 +739,7 @@ export class Entities {
     this.child = new ChildChase(scene);
     this.grocer = new Walker(scene, { shirt: 0xc98a5a, pants: 0x37413c, female: true }, "grocery");
     this.biker = new Walker(scene, { shirt: 0x39506b, pants: 0x2c2c34, hat: "cap" });
-    this.cat = new Cat(scene, 38.9, 48.4);
+    this.cat = new Cat(scene, 40.8, 50.6);
     this.cyclist = new Cyclist(scene);
 
     this.birds.push(new Bird(scene, 5, 34, 85, 0.12, 0, -10));
@@ -687,7 +747,7 @@ export class Entities {
     this.flutters.push(new Flutter(scene, 36.5, 1.4, 46.5, 0xf2e8c8));
     this.flutters.push(new Flutter(scene, 8, 2.2, -12, 0xf2b8c6));
     this.flutters.push(new Flutter(scene, -44, 1.6, -26, 0xdfeef2));
-    for (const [fx, fz] of [[20, 18], [46, 24], [60, 21]] as [number, number][]) {
+    for (const [fx, fz] of [[20, 24], [46, 23.5], [60, 22]] as [number, number][]) {
       this.flies.push(new Dragonfly(scene, fx, fz));
     }
 
@@ -709,19 +769,19 @@ export class Entities {
 
     /* ---- interaction choreography (bell curves ⇒ reversible) ---- */
     this.haru.update(dt, clock, {
-      look: bell(t, 0.226, 0.011) * (1 - bell(t, 0.233, 0.017) * 0.4),
-      wave: bell(t, 0.233, 0.017),
+      look: bell(t, 0.283, 0.011) * (1 - bell(t, 0.30, 0.017) * 0.4),
+      wave: bell(t, 0.30, 0.017),
     }, bp);
-    this.gen.update(dt, clock, { look: bell(t, 0.282, 0.012), nod: bell(t, 0.284, 0.012) }, bp);
-    this.kosaku.update(dt, clock, { nod: bell(t, 0.585, 0.013) }, bp);
-    this.miyo.update(dt, clock, { bow: bell(t, 0.72, 0.014) }, bp);
-    this.nana.update(dt, clock, { look: bell(t, 0.78, 0.03) * 0.6 }, bp);
+    this.gen.update(dt, clock, { look: bell(t, 0.39, 0.012), nod: bell(t, 0.40, 0.012) }, bp);
+    this.kosaku.update(dt, clock, { nod: bell(t, 0.665, 0.013) }, bp);
+    this.miyo.update(dt, clock, { bow: bell(t, 0.78, 0.014) }, bp);
+    this.nana.update(dt, clock, { look: bell(t, 0.84, 0.03) * 0.6 }, bp);
 
-    /* ---- square micro-stories ---- */
+    /* ---- square micro-stories (kept clear of the boy's path) ---- */
     this.elders.update(clock);
-    this.child.update(dt, clock, 36.5, 46.5);
-    this.grocer.walk(dt, clock, 30.5, 47.5, 34.5, 40.5, 11, 0.8);
-    this.biker.walk(dt, clock, 25.5, 43.5, 28.5, 45.8, 13, 3.4);
+    this.child.update(dt, clock, 41.5, 45.5);
+    this.grocer.walk(dt, clock, 33, 41.5, 31, 47.5, 11, 0.8);
+    this.biker.walk(dt, clock, 24, 42.5, 27, 44.8, 13, 3.4);
     this.cat.update(clock);
     this.cyclist.update(dt, clock);
 
