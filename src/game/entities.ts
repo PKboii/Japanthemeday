@@ -760,6 +760,24 @@ export class Entities {
     }
   }
 
+  /* camera colliders for the cast — the lens must never pass through a person */
+  private npcCols: { x: number; y: number; z: number; r: number }[] = [];
+  getColliders(): { x: number; y: number; z: number; r: number }[] {
+    this.npcCols.length = 0;
+    const push = (o: THREE.Object3D, r: number, yOff = 1) => {
+      const p = o.position;
+      this.npcCols.push({ x: p.x, y: p.y + yOff, z: p.z, r });
+    };
+    push(this.haru.rig.root, 0.6); push(this.gen.rig.root, 0.6);
+    push(this.kosaku.rig.root, 0.6); push(this.miyo.rig.root, 0.6);
+    push(this.nana.rig.root, 0.6); push(this.grocer.rig.root, 0.6);
+    push(this.biker.rig.root, 0.6); push(this.child.rig.root, 0.5, 0.7);
+    push(this.elders.a.root, 0.55, 0.9); push(this.elders.b.root, 0.55, 0.9);
+    push(this.cat.root, 0.45, 0.3);
+    if (this.cyclist.rig.root.visible) push(this.cyclist.rig.root, 0.7);
+    return this.npcCols;
+  }
+
   update(dt: number, clock: number, boyT: number, camPos: THREE.Vector3) {
     const t = S.t;
     const gust = S.gust;

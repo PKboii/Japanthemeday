@@ -84,7 +84,10 @@ function terraceH(x: number, z: number): number {
   const c = -16 - tier * 7 - 3.5;
   const inT = smooth(clamp(1 - Math.abs(z - c) / 3.9, 0, 1));
   const ex = smooth(clamp(1 - Math.max(6 - x, x - 50) / 3, 0, 1));
-  return (tier + 1) * 0.72 * inT * ex;
+  /* keep a flat aze (field-path) corridor along the boy's route */
+  const rd = routeDist(x, z);
+  const pathFade = smooth(clamp((rd - 2.4) / 2.6, 0, 1));
+  return (tier + 1) * 0.72 * inT * ex * pathFade;
 }
 
 function mound(x: number, z: number, cx: number, cz: number, r: number, h: number): number {
@@ -134,13 +137,19 @@ const DECK_Y = 8.8;
 export function heightAt(x: number, z: number): number {
   const h = terrainH(x, z);
   let out = h;
-  if (x > 31.4 && x < 36.6 && z > 18.2 && z < 26.4) out = Math.max(out, 0.62);      // bridge
+  /* bridge deck — flat across the planks (z 16.8–28.8), gentle ramps on the banks */
+  if (x > 30.6 && x < 37.4 && z > 15.4 && z < 30.2) {
+    const ex = smooth(clamp(1 - Math.max(31.5 - x, x - 36.5) / 0.9, 0, 1));
+    const ezIn = smooth(clamp((z - 15.4) / 1.4, 0, 1));
+    const ezOut = smooth(clamp((30.2 - z) / 1.4, 0, 1));
+    out = Math.max(out, 0.62 * ex * Math.min(ezIn, ezOut));
+  }
   if (x > 55.4 && x < 62.6 && z > 71.4 && z < 76.8) out = Math.max(out, DECK_Y);    // lookout deck
   return out;
 }
 
 export function surfaceAt(x: number, z: number): "grass" | "dirt" | "stone" | "wood" {
-  if (x > 31.4 && x < 36.6 && z > 18.2 && z < 26.4) return "wood";
+  if (x > 31.5 && x < 36.5 && z > 16.8 && z < 28.8) return "wood";
   if (x > 55.4 && x < 62.6 && z > 71.4 && z < 76.8) return "wood";
   if (routeDist(x, z) < 2.6) return x < -18 ? "dirt" : "stone";
   const dc = Math.sqrt((x - 34) ** 2 + (z - 44) ** 2);
@@ -189,6 +198,7 @@ export class World {
     this.buildSky();
     this.buildTerrain();
     this.buildWater();
+    this.buildBridge();
     this.buildRouteDressing();
     this.buildHouses();
     this.buildSquare();
@@ -357,6 +367,52 @@ export class World {
       reeds.setMatrixAt(i, m4);
     }
     this.scene.add(reeds);
+  }
+
+  /* ---------------- BRIDGE ---------------- */
+  private buildBridge() {
+    const deckY = 0.62;
+    const x0 = 31.5, x1 = 36.5, z0 = 16.8, z1 = 28.8;
+    const woodM = new THREE.MeshStandardMaterial({ color: 0x8a6f4d, roughness: 0.9 });
+    const darkM = new THREE.MeshStandardMaterial({ color: 0x6b553c, roughness: 0.95 });
+    /* deck planks running across the walk */
+    const plankGeo = new THREE.BoxGeometry(x1 - x0, 0.12, 0.5);
+    for (let z = z0 + 0.3; z < z1; z += 0.62) {
+      const p = new THREE.Mesh(plankGeo, Math.floor(z / 0.62) % 2 ? woodM : darkM);
+      p.position.set((x0 + x1) / 2, deckY - 0.06, z);
+      p.receiveShadow = true;
+      this.scene.add(p);
+    }
+    /* side stringers */
+    for (const sx of [x0 + 0.15, x1 - 0.15]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.26, z1 - z0), darkM);
+      beam.position.set(sx, deckY - 0.2, (z0 + z1) / 2);
+      beam.castShadow = true;
+      this.scene.add(beam);
+    }
+    /* railings on both sides — set just inside the deck edge so the walker stays clear */
+    for (const sx of [x0 + 0.25, x1 - 0.25]) {
+      for (let z = z0; z <= z1 + 0.01; z += 2.4) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.85, 0.14), darkM);
+        post.position.set(sx, deckY + 0.42, z);
+        post.castShadow = true;
+        this.scene.add(post);
+      }
+      for (const rh of [0.5, 0.82]) {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.07, z1 - z0), woodM);
+        rail.position.set(sx, deckY + rh, (z0 + z1) / 2);
+        this.scene.add(rail);
+      }
+    }
+    /* slightly taller entrance posts */
+    for (const sx of [x0 + 0.25, x1 - 0.25]) {
+      for (const ez of [z0, z1]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.1, 0.2), darkM);
+        post.position.set(sx, deckY + 0.55, ez);
+        post.castShadow = true;
+        this.scene.add(post);
+      }
+    }
   }
 
   /* ---------------- ROUTE DRESSING ---------------- */
@@ -777,10 +833,10 @@ export class World {
       this.scene.add(st);
     }
 
-    /* 9 — veranda + wind chime */
-    this.building(44, 55, -2.5, { w: 6, d: 5.4, h: 2.8, roofH: 2, wall: 0xc3b092, roof: 0x4c4238, engawa: true, windows: 2, chimney: true });
-    this.windChime(46.2, heightAt(44, 55) + 2.6, 57.4);
-    this.laundry(49, 52);
+    /* 9 — veranda + wind chime (set east of the square, clear of the hill path) */
+    this.building(52, 50, -2.2, { w: 6, d: 5.4, h: 2.8, roofH: 2, wall: 0xc3b092, roof: 0x4c4238, engawa: true, windows: 2, chimney: true });
+    this.windChime(54.2, heightAt(52, 50) + 2.6, 52.4);
+    this.laundry(56, 53);
 
     /* 10 — kura storehouse */
     this.building(22, 52, 0.4, { w: 4.6, d: 4.2, h: 3.1, roofH: 1.5, wall: 0xe8e2d2, roof: 0x31343c, windows: 0 });
@@ -826,6 +882,7 @@ export class World {
     wr.position.set(30, heightAt(30, 45) + 2.3, 45);
     this.scene.add(wr);
     for (const sx of [-1, 1]) this.box(0.16, 1.4, 0.16, 0x5a4a33, 30 + sx * 1.1, heightAt(30, 45) + 1.7, 45);
+    this.colliders.push({ x: 30, y: heightAt(30, 45) + 1.5, z: 45, r: 1.5 });
 
     /* notice board */
     this.box(0.14, 1.9, 0.14, 0x5a4a33, 38.5, heightAt(38.5, 47.5) + 0.95, 47.5);

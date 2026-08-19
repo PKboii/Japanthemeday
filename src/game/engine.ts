@@ -197,8 +197,10 @@ export class Engine {
     /* the camera is a physical object: it may never travel through a trunk,
        a canopy or a wall (disabled only during the intentional blossom wipe) */
     if (S.t > 0.16) {
+      const cast = this.ent.getColliders();
       for (let pass = 0; pass < 2; pass++) {
-        for (const c of this.world.colliders) {
+        for (let ci = 0; ci < this.world.colliders.length + cast.length; ci++) {
+          const c = ci < this.world.colliders.length ? this.world.colliders[ci] : cast[ci - this.world.colliders.length];
           const dx = this.tmpPos.x - c.x, dy = this.tmpPos.y - c.y, dz = this.tmpPos.z - c.z;
           const rr = c.r + 0.7;
           if (Math.abs(dx) > rr || Math.abs(dy) > rr || Math.abs(dz) > rr) continue;
