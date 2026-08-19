@@ -1,691 +1,240 @@
-/* The director: one persistent world, a scroll-driven day, a game camera,
-   interactions, quests, memories — scroll is the timeline, WASD is the body. */
+/* The Director: one persistent 3D world, one scroll-scrubbed cinematic
+   timeline. Scroll → S.t → camera keys + boy path position + NPC cues.
+   Scrolling backward reverses the film; nothing is ever a cut. */
 
 import * as THREE from "three";
-import { S, Season, Weather, MEMORIES, hourLabel, dayPhase, clamp, lerp, smooth, dist2 } from "./state";
-import { World, heightAt, riverX } from "./world";
-import { Entities, Rig } from "./entities";
+import { World, heightAt, riverZ } from "./world";
+import { Entities } from "./entities";
+import { S, bell, clamp, lerp, piecewise, smooth } from "./state";
 import { audio } from "./audio";
 
-export interface UIState {
-  time: string; phase: string; season: Season; weather: Weather;
-  rep: number; memories: number; totalMemories: number;
-  prompt: string | null;
-  dialogue: { name: string; role: string; text: string; last: boolean } | null;
-  caption: { title: string; sub: string; o: number } | null;
-  festival: boolean; intro: boolean; carrying: string | null;
-  questHint: string | null; audioOn: boolean;
-  journalOpen: boolean;
+interface Hooks {
+  onProgress: (t: number) => void;
+  onCaption: (idx: number) => void;
+  onReady: () => void;
 }
 
-export interface Hooks {
-  onUI: (s: UIState) => void;
-  onToast: (text: string, kind?: "info" | "memory" | "quest") => void;
-  onPhoto: () => void;
-  onMemory: (id: string) => void;
-}
-
-const INTRO_PATH: [number, number][] = [[-101, -33], [-82, -24], [-58, -12], [-34, -4], [-10, 2], [4, 8]];
-const INTRO_END = 0.13;
-
-const CAPTIONS: [number, string, string][] = [
-  [0.0, "HINOMORI 日ノ森", "A day in the valley — scroll to begin the morning"],
-  [0.045, "The Hill Path", "Haru walks down toward waking roofs"],
-  [0.14, "Morning Chores", "Bread fires, shutters open, the square stretches"],
-  [0.26, "Errands & Neighbors", "Everyone has a place to be — walk with them"],
-  [0.38, "Terraces at Midday", "Water, green rows, a heron standing guard"],
-  [0.5, "The River Keeps Time", "Old bridge, cold water, patient reeds"],
-  [0.62, "Golden Hour", "Long shadows lean on warm windows"],
-  [0.74, "Lanterns Awake", "The village trades sunlight for paper light"],
-  [0.86, "Night Falls Gently", "Stars over the valley, the last train humming home"],
-  [0.965, "Home", "Not where he lives — where he belongs"],
+export const CAPTIONS: [number, number, string, string][] = [
+  [0.155, 0.195, "朝", "A morning road"],
+  [0.218, 0.262, "花", "Haru's flowers"],
+  [0.330, 0.425, "桜", "Cherry-blossom lane"],
+  [0.452, 0.505, "風", "A breath of wind"],
+  [0.515, 0.555, "田", "The paddies wake"],
+  [0.600, 0.645, "橋", "Crossing the river"],
+  [0.700, 0.742, "店", "The little shop"],
+  [0.762, 0.815, "広場", "Village square"],
+  [0.893, 0.935, "丘", "The hill above"],
+  [0.962, 1.001, "森", "A quiet morning in Hinomori"],
 ];
 
-const NOTICES = [
-  "Lost: one red umbrella. Last seen walking toward the river. — Aiko",
-  "Festival lanterns need steady hands at dusk. Bring your own thumbs.",
-  "The 16:12 train runs on mountain time today. It apologizes.",
-  "South farm pumpkins are ripening. Please do not compliment them; they blush.",
-  "Bakery: yuzu bread on the first sunny day after rain.",
+/* ---------------- camera choreography ---------------- */
+interface Key { t: number; pos: [number, number, number]; look: [number, number, number]; fov: number }
+const KEYS: Key[] = [
+  { t: 0.000, pos: [-20, 82, 128], look: [14, 2, -8], fov: 38 },        // establishing aerial
+  { t: 0.055, pos: [-46, 52, 84], look: [-26, 4, -18], fov: 40 },       // descending
+  { t: 0.100, pos: [-64, 10, 10], look: [-70, 2.4, -34], fov: 46 },     // low approach
+  { t: 0.128, pos: [-67, 4.4, -5], look: [-71, 2, -26], fov: 48 },      // blossom wipe
+  { t: 0.160, pos: [-79, 2.6, -56.5], look: [-66, 1.4, -44], fov: 50 }, // the boy at his gate
+  { t: 0.195, pos: [-50, 2.3, -38.5], look: [-38, 1.4, -33], fov: 50 }, // follow the road
+  { t: 0.230, pos: [-33.5, 2.2, -28.5], look: [-38.5, 1.4, -31], fov: 48 },   // Haru
+  { t: 0.275, pos: [-12.5, 2.2, -15.5], look: [-11.5, 1.35, -26], fov: 49 }, // Gen the repairman
+  { t: 0.330, pos: [-16, 2.4, -10], look: [-2, 1.6, -20], fov: 50 },    // enter the lane
+  { t: 0.400, pos: [3, 2.1, -14.5], look: [19, 1.6, -5], fov: 51 },     // side-track under blossoms
+  { t: 0.455, pos: [21, 2.3, -1.5], look: [16.5, 4.2, -8], fov: 50 },   // gust — tilt up into canopy
+  { t: 0.505, pos: [43, 5.6, -1], look: [13, 1.2, -22], fov: 46 },      // paddy reveal
+  { t: 0.570, pos: [27, 2.3, 25], look: [40, 1.5, 14.5], fov: 50 },     // the farmer at the channel
+  { t: 0.605, pos: [42, 2.4, 22], look: [33, 1.8, 21.5], fov: 50 },     // bridge, side angle
+  { t: 0.655, pos: [38.5, 2.3, 26.5], look: [34, 1.5, 35], fov: 50 },   // toward the shop
+  { t: 0.695, pos: [31, 2.3, 46], look: [40, 1.8, 40], fov: 50 },       // shop ahead over shoulder
+  { t: 0.725, pos: [40.5, 2.1, 42.2], look: [44.2, 1.6, 40.6], fov: 47 }, // Miyo bows (close)
+  { t: 0.775, pos: [27, 3.4, 50.5], look: [35, 1.5, 43], fov: 53 },     // square — wide, parallax
+  { t: 0.830, pos: [31.5, 3, 47.5], look: [42, 2.5, 56], fov: 50 },     // leaving for the hill
+  { t: 0.895, pos: [45.5, 5.8, 59], look: [53, 7.5, 68], fov: 48 },     // the climb
+  { t: 0.945, pos: [67, 10, 82], look: [44, 5, 26], fov: 44 },          // orbit past him — reveal
+  { t: 1.000, pos: [-10, 66, 130], look: [16, 2, 0], fov: 37 },         // grand pull-back
 ];
 
-export function createGame(container: HTMLElement, hooks: Hooks) {
-  /* ---------- renderer / scene ---------- */
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-  renderer.setSize(container.clientWidth, container.clientHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.08;
-  container.appendChild(renderer.domElement);
+/* scroll → boy's arc-length position on the route (monotonic; plateaus = beats) */
+const BOY_MAP: [number, number][] = [
+  [0, 0], [0.115, 0], [0.155, 0.015], [0.21, 0.222], [0.255, 0.222],
+  [0.27, 0.36], [0.305, 0.36], [0.44, 0.507], [0.505, 0.507],
+  [0.545, 0.62], [0.575, 0.683], [0.60, 0.683], [0.65, 0.73],
+  [0.69, 0.76], [0.705, 0.779], [0.735, 0.779], [0.80, 0.83],
+  [0.86, 0.88], [0.93, 0.965], [1, 1],
+];
 
-  const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xdfe8dc, 70, 360);
+export class Engine {
+  private renderer: THREE.WebGLRenderer;
+  private scene = new THREE.Scene();
+  private camera: THREE.PerspectiveCamera;
+  private world: World;
+  private ent: Entities;
+  private hooks: Hooks;
+  private raf = 0;
+  private last = performance.now();
+  private clock = 0;
+  private lastCaption = -2;
+  private lastSent = -1;
+  private sun: THREE.DirectionalLight;
+  private disposed = false;
+  private sunSprite!: THREE.Sprite;
 
-  const camera = new THREE.PerspectiveCamera(55, container.clientHeight ? container.clientWidth / container.clientHeight : 1, 0.1, 1000);
-  camera.position.set(-112, 24, -20);
+  constructor(canvas: HTMLCanvasElement, hooks: Hooks) {
+    this.hooks = hooks;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-  /* ---------- lights ---------- */
-  const hemi = new THREE.HemisphereLight(0xbfd8ea, 0x57624a, 0.65);
-  scene.add(hemi);
-  const ambient = new THREE.AmbientLight(0xffffff, 0.12);
-  scene.add(ambient);
-  const sun = new THREE.DirectionalLight(0xfff2dc, 1.2);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -55; sun.shadow.camera.right = 55;
-  sun.shadow.camera.top = 55; sun.shadow.camera.bottom = -55;
-  sun.shadow.camera.near = 10; sun.shadow.camera.far = 320;
-  sun.shadow.bias = -0.0006;
-  scene.add(sun);
-  scene.add(sun.target);
-  const moonLight = new THREE.DirectionalLight(0x8aa2cc, 0.0);
-  scene.add(moonLight);
+    this.camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 700);
+    this.camera.position.set(...KEYS[0].pos);
 
-  /* ---------- world & entities ---------- */
-  const world = new World(scene);
-  const ent = new Entities(scene, world);
+    /* morning light */
+    this.scene.fog = new THREE.Fog(0xe3ecf0, 130, 470);
+    const hemi = new THREE.HemisphereLight(0xcfe2f0, 0xb8c49c, 0.95);
+    this.scene.add(hemi);
+    this.sun = new THREE.DirectionalLight(0xffe9c2, 2.5);
+    this.sun.position.set(85, 95, -55);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const sc = this.sun.shadow.camera;
+    sc.left = -110; sc.right = 110; sc.top = 110; sc.bottom = -110;
+    sc.near = 10; sc.far = 320;
+    this.sun.shadow.bias = -0.0006;
+    this.sun.target.position.set(0, 0, 10);
+    this.scene.add(this.sun, this.sun.target);
+    const fill = new THREE.DirectionalLight(0xbcd4e8, 0.5);
+    fill.position.set(-60, 40, 80);
+    this.scene.add(fill);
 
-  /* place player at the hill path start */
-  const player = ent.player;
-  player.root.position.set(INTRO_PATH[0][0], 0, INTRO_PATH[0][1]);
-  player.root.position.y = heightAt(INTRO_PATH[0][0], INTRO_PATH[0][1]);
-  player.root.rotation.y = 1.25;
+    /* soft sun disc for the morning sky */
+    const glowTex = (() => {
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = 64;
+      const c = cv.getContext("2d")!;
+      const g = c.createRadialGradient(32, 32, 2, 32, 32, 30);
+      g.addColorStop(0, "rgba(255,244,214,1)");
+      g.addColorStop(0.4, "rgba(255,238,200,0.55)");
+      g.addColorStop(1, "rgba(255,238,200,0)");
+      c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+      const t = new THREE.CanvasTexture(cv);
+      return t;
+    })();
+    this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, fog: false, transparent: true, opacity: 0.95, depthWrite: false }));
+    this.sunSprite.position.set(210, 185, -160);
+    this.sunSprite.scale.setScalar(70);
+    this.scene.add(this.sunSprite);
 
-  /* ---------- state ---------- */
-  const keys: Record<string, boolean> = {};
-  let camYaw = 1.25 + Math.PI + 0.5;
-  let camPitch = 0.42;
-  const camPos = new THREE.Vector3().copy(camera.position);
-  let dragging = false;
-  let lastPX = 0, lastPY = 0;
-  let moveTarget: THREE.Vector3 | null = null;
-  let sitBench: { x: number; z: number } | null = null;
-  let sp = 0;              // smoothed scroll progress
-  let noticeIdx = 0;
-  let uiT = 0;
-  let dialog: { npcIdx: number; pages: string[]; page: number; effect?: () => void } | null = null;
-  let prompt: { label: string; act: () => void } | null = null;
-  let cin = { mode: "" as "" | "valley", t: 0 };
-  let gustT = 14;
-  let toastId = 0;
-  let disposed = false;
-  let journalOpen = false;
-  const ray = new THREE.Raycaster();
-  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  const tmpV = new THREE.Vector3();
+    this.world = new World(this.scene);
+    this.ent = new Entities(this.scene, this.world);
 
-  const seenCin = { valley: false, bridgeTrain: false, firstSnow: false, festival: false };
+    window.addEventListener("resize", this.onResize);
+    window.addEventListener("pointermove", this.onPointer, { passive: true });
 
-  /* ---------- input ---------- */
-  const onKey = (e: KeyboardEvent, down: boolean) => {
-    keys[e.code] = down;
-    if (!down) return;
-    if (["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
-      if (S.intro || !S.free) { S.free = true; S.intro = false; moveTarget = null; }
-      if (sitBench) { sitBench = null; }
-      audio.ensure();
-    }
-    if (e.code === "KeyE") { doInteract(); }
-    if (e.code === "KeyP") { takePhoto(); }
-    if (e.code === "KeyJ") { journalOpen = !journalOpen; audio.uiTap(); pushUI(); }
-    if (e.code === "Space") { e.preventDefault(); doInteract(); }
-    if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys.shift = down;
+    this.last = performance.now();
+    this.loop();
+  }
+
+  private onResize = () => {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
   };
-  const kd = (e: KeyboardEvent) => onKey(e, true);
-  const ku = (e: KeyboardEvent) => onKey(e, false);
-  window.addEventListener("keydown", kd);
-  window.addEventListener("keyup", ku);
 
-  const el = renderer.domElement;
-  el.style.touchAction = "pan-y";
-  let downX = 0, downY = 0, downT = 0, moved = 0;
-  const pd = (e: PointerEvent) => {
-    dragging = true; moved = 0;
-    lastPX = downX = e.clientX; lastPY = downY = e.clientY; downT = performance.now();
-    audio.ensure();
-    el.setPointerCapture(e.pointerId);
+  private onPointer = (e: PointerEvent) => {
+    S.mx = (e.clientX / window.innerWidth) * 2 - 1;
+    S.my = (e.clientY / window.innerHeight) * 2 - 1;
   };
-  const pm = (e: PointerEvent) => {
-    if (!dragging) return;
-    const dx = e.clientX - lastPX, dy = e.clientY - lastPY;
-    lastPX = e.clientX; lastPY = e.clientY;
-    moved += Math.abs(dx) + Math.abs(dy);
-    camYaw -= dx * 0.0052;
-    camPitch = clamp(camPitch + dy * 0.004, 0.12, 1.15);
-  };
-  const pu = (e: PointerEvent) => {
-    dragging = false;
-    const quick = performance.now() - downT < 260 && moved < 8;
-    if (quick) {
-      if (prompt) { doInteract(); return; }
-      /* tap-to-walk */
-      const rect = el.getBoundingClientRect();
-      const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      ray.setFromCamera(new THREE.Vector2(nx, ny), camera);
-      groundPlane.constant = -player.root.position.y;
-      const hit = new THREE.Vector3();
-      if (ray.ray.intersectPlane(groundPlane, hit)) {
-        if (dist2(hit.x, hit.z, player.root.position.x, player.root.position.z) < 60) {
-          moveTarget = hit;
-          S.free = true; S.intro = false;
-          if (sitBench) sitBench = null;
-        }
-      }
-    }
-  };
-  el.addEventListener("pointerdown", pd);
-  el.addEventListener("pointermove", pm);
-  el.addEventListener("pointerup", pu);
 
-  const onScroll = () => { /* read live in loop */ };
-  window.addEventListener("scroll", onScroll, { passive: true });
-
-  const onResize = () => {
-    const w = container.clientWidth, h = container.clientHeight;
-    renderer.setSize(w, h);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  };
-  window.addEventListener("resize", onResize);
-
-  /* ---------- dialogue / quests ---------- */
-  function npcDialogue(i: number) {
-    const def = ent.npcs[i].def;
-    const h = S.time;
-    let pages: string[] = [];
-    let effect: (() => void) | undefined;
-    const greet = def.lines.find((l) => h >= l.min && h <= l.max)?.text ?? "Hello there.";
-    if (def.name === "Hana" && S.questBread === 0 && h > 6.5 && h < 16.5) {
-      pages = [greet, "Haru, dear — could you run this anpan to Kenji?", "He's down in the terraces. Tell him it's still warm."];
-      effect = () => {
-        S.questBread = 1;
-        player.props.getObjectByName("bun")!.visible = true;
-        hooks.onToast("Carrying a warm anpan to Kenji", "quest");
-      };
-    } else if (def.name === "Kenji" && S.questBread === 1) {
-      pages = ["Oh — from Hana? I can smell the yuzu through the paper.", "You've saved my afternoon. Tell her the paddies are turning gold."];
-      effect = () => {
-        S.questBread = 2; S.rep += 1;
-        player.props.getObjectByName("bun")!.visible = false;
-        audio.chime();
-        hooks.onToast("Village trust +1 — Kenji smiles into his tea", "quest");
-      };
-    } else if (def.name === "Aiko" && S.questUmbrella === 0) {
-      pages = [greet, "My red umbrella has wandered off again — somewhere by the reeds, I'd wager.", "It likes the river. It always has."];
-    } else if (def.name === "Aiko" && S.questUmbrella === 1) {
-      pages = ["You found it! It always comes home smelling of river water.", "Thank you, Haru. Mochi seems to approve, and that is rare."];
-      effect = () => {
-        S.questUmbrella = 2; S.rep += 1;
-        player.props.getObjectByName("umb")!.visible = false;
-        audio.chime();
-        hooks.onToast("Village trust +1 — Aiko laughs like wind chimes", "quest");
-      };
-    } else if (def.name === "Sato" && ent.train.visible) {
-      pages = ["There she is — right on time, as the mountains insist.", "Mind the gap. It's a very small gap, but we respect it."];
-    } else {
-      pages = [greet];
-      if (S.questBread === 1 && def.name !== "Kenji" && Math.random() < 0.4) pages.push("Smells like Hana's anpan. Lucky Kenji.");
-      if (S.questUmbrella === 1 && def.name !== "Aiko" && Math.random() < 0.4) pages.push("Is that Aiko's umbrella? That thing travels more than I do.");
-    }
-    dialog = { npcIdx: i, pages, page: 0, effect };
-    audio.uiTap();
-    pushUI();
+  private readScroll(): number {
+    const max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+    return clamp(window.scrollY / max, 0, 1);
   }
 
-  function doInteract() {
-    audio.ensure();
-    if (dialog) {
-      dialog.page++;
-      if (dialog.page >= dialog.pages.length) {
-        dialog.effect?.();
-        dialog = null;
-      }
-      audio.uiTap();
-      pushUI();
-      return;
-    }
-    prompt?.act();
-    pushUI();
+  private camAt(t: number, outPos: THREE.Vector3, outLook: THREE.Vector3): number {
+    let i = 0;
+    while (i < KEYS.length - 2 && t > KEYS[i + 1].t) i++;
+    const a = KEYS[i], b = KEYS[i + 1];
+    const u = smooth(clamp((t - a.t) / (b.t - a.t), 0, 1));
+    outPos.set(lerp(a.pos[0], b.pos[0], u), lerp(a.pos[1], b.pos[1], u), lerp(a.pos[2], b.pos[2], u));
+    outLook.set(lerp(a.look[0], b.look[0], u), lerp(a.look[1], b.look[1], u), lerp(a.look[2], b.look[2], u));
+    return lerp(a.fov, b.fov, u);
   }
 
-  function addMemory(id: string) {
-    if (S.memories.includes(id)) return;
-    S.memories.push(id);
-    hooks.onMemory(id);
-    const def = MEMORIES.find((m) => m.id === id);
-    if (def) hooks.onToast(`Memory kept — ${def.title}`, "memory");
-    audio.chime();
-  }
+  private tmpPos = new THREE.Vector3();
+  private tmpLook = new THREE.Vector3();
+  private smoothPos = new THREE.Vector3(...KEYS[0].pos);
+  private smoothLook = new THREE.Vector3(...KEYS[0].look);
+  private fov = KEYS[0].fov;
 
-  function takePhoto() {
-    audio.ensure();
-    audio.shutter();
-    hooks.onPhoto();
-    const p = player.root.position;
-    let got = false;
-    for (const s of world.photoSpots) {
-      if (dist2(p.x, p.z, s.x, s.z) < 10) {
-        if (!S.memories.includes(s.id)) { addMemory(s.id); got = true; }
-        else { hooks.onToast("You already keep this view."); got = true; }
-        break;
-      }
+  private loop = () => {
+    if (this.disposed) return;
+    this.raf = requestAnimationFrame(this.loop);
+    const now = performance.now();
+    const dt = clamp((now - this.last) / 1000, 0.001, 0.05);
+    this.last = now;
+    this.clock += dt;
+
+    /* scroll is the director — damped so it glides, never jerks */
+    S.raw = this.readScroll();
+    S.t = lerp(S.t, S.raw, 1 - Math.exp(-3.6 * dt));
+    if (Math.abs(S.t - S.raw) < 0.0004) S.t = S.raw;
+    S.gust = bell(S.t, 0.477, 0.034);
+
+    const boyT = piecewise(BOY_MAP, S.t);
+
+    /* camera from keys + gentle pointer parallax (stronger in the square) */
+    const fov = this.camAt(S.t, this.tmpPos, this.tmpLook);
+    const minY = heightAt(this.tmpPos.x, this.tmpPos.z) + 0.9;
+    if (this.tmpPos.y < minY) this.tmpPos.y = minY;
+
+    const par = S.parallax * (0.55 + bell(S.t, 0.785, 0.07) * 1.7 + bell(S.t, 0.97, 0.05) * 1.2);
+    const dir = new THREE.Vector3().subVectors(this.tmpLook, this.tmpPos).normalize();
+    const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+    this.tmpLook.addScaledVector(right, -S.mx * par * 2.2);
+    this.tmpLook.y += S.my * par * 0.9;
+
+    const k = 1 - Math.exp(-6.5 * dt);
+    this.smoothPos.lerp(this.tmpPos, k);
+    this.smoothLook.lerp(this.tmpLook, k);
+    this.fov = lerp(this.fov, fov, k);
+    this.camera.position.copy(this.smoothPos);
+    this.camera.lookAt(this.smoothLook);
+    this.camera.fov = this.fov;
+    this.camera.updateProjectionMatrix();
+
+    /* world + cast */
+    this.ent.update(dt, this.clock, boyT, this.camera.position);
+    this.world.update(dt, this.clock, S.gust);
+    audio.update(this.camera.position, riverZ(this.camera.position.x), dt);
+
+    this.renderer.render(this.scene, this.camera);
+
+    /* UI sync */
+    if (Math.abs(S.t - this.lastSent) > 0.0012) {
+      this.lastSent = S.t;
+      this.hooks.onProgress(S.t);
     }
-    if (!got) {
-      if (S.season === "spring") {
-        for (const [cx, cz] of [[8, -15], [-6, -26], [-14, -62], [-33, -78], [118, 4], [62, 24], [-70, 44], [30, -52]] as [number, number][]) {
-          if (dist2(p.x, p.z, cx, cz) < 8) { addMemory("blossom"); got = true; break; }
-        }
-      }
-      if (!got && S.season === "winter") { addMemory("snow"); got = true; }
-      if (!got && S.season === "autumn" && p.x > -18 && p.x < 52 && p.z > 56 && p.z < 118) { addMemory("fields"); got = true; }
-      if (!got && S.season === "summer" && S.night > 0.5 && Math.abs(p.x - riverX(p.z)) < 24) { addMemory("fireflies"); got = true; }
-      if (!got) hooks.onToast("A quiet moment — but somewhere special is waiting.");
-    }
-  }
-
-  /* ---------- interaction scan ---------- */
-  function scanInteractions() {
-    prompt = null;
-    const p = player.root.position;
-    let best = 2.9, bestAct: (() => void) | null = null, bestLabel = "";
-
-    if (dialog) { prompt = { label: "Keep listening…", act: doInteract }; return; }
-
-    for (let i = 0; i < ent.npcs.length; i++) {
-      const n = ent.npcs[i];
-      if (!n.rig.root.visible) continue;
-      const d = dist2(p.x, p.z, n.rig.root.position.x, n.rig.root.position.z);
-      if (d < best) { best = d; bestLabel = `Talk with ${n.def.name} · ${n.def.role}`; bestAct = () => npcDialogue(i); }
-    }
-    const catP = ent.cat.position;
-    const dCat = dist2(p.x, p.z, catP.x, catP.z);
-    if (dCat < 2.1 && dCat < best) {
-      best = dCat;
-      bestLabel = "Pet Mochi the cat";
-      bestAct = () => {
-        audio.meow();
-        if (S.rep >= 2 && !S.memories.includes("cat")) addMemory("cat");
-        else hooks.onToast("Mochi allows exactly one pet. You used it wisely.");
-      };
-    }
-    for (const s of world.interactables) {
-      const d = dist2(p.x, p.z, s.x, s.z);
-      if (d >= best) continue;
-      if (s.kind === "umbrella") {
-        if (S.questUmbrella !== 0 || true) {
-          if (S.questUmbrella === 2) continue;
-          if (d < 2.4) {
-            best = d; bestLabel = "Pick up the red umbrella";
-            bestAct = () => {
-              S.questUmbrella = 1;
-              world.umbrellaObj.visible = false;
-              player.props.getObjectByName("umb")!.visible = true;
-              audio.uiTap();
-              hooks.onToast("A red umbrella, smelling faintly of rain", "quest");
-            };
-          }
-        }
-      } else if (d < 2.4) {
-        best = d;
-        if (s.kind === "bench") {
-          bestLabel = sitBench ? "Stand up" : "Sit on the bench";
-          const sx = s.x, sz = s.z;
-          bestAct = () => {
-            if (sitBench) { sitBench = null; return; }
-            sitBench = { x: sx, z: sz };
-            player.root.position.set(sx, heightAt(sx, sz) + 0.66, sz);
-            audio.uiTap();
-          };
-        } else if (s.kind === "vending") {
-          bestLabel = "Buy a cold ramune · ¥120";
-          bestAct = () => { audio.chime(); hooks.onToast("A cold ramune rolls out. The machine hums, pleased."); };
-        } else if (s.kind === "bell") {
-          bestLabel = "Ring the shrine bell";
-          bestAct = () => {
-            audio.bell();
-            hooks.onToast("Karan — the ring rolls over the cedars and keeps going.");
-            if (S.season === "spring") addMemory("shrine");
-          };
-        } else if (s.kind === "board") {
-          bestLabel = "Read the notices";
-          bestAct = () => { noticeIdx = (noticeIdx + 1) % NOTICES.length; hooks.onToast(NOTICES[noticeIdx]); audio.uiTap(); };
-        } else if (s.kind === "well") {
-          bestLabel = "Peer into the old well";
-          bestAct = () => hooks.onToast("Your face looks back, ten years younger and wobbly.");
-        } else if (s.kind === "bike") {
-          bestLabel = "Admire the bicycle";
-          bestAct = () => hooks.onToast("Well-oiled. Satoshi keeps every wheel in the valley honest.");
-        } else if (s.kind === "view" || s.kind === "photo") {
-          bestLabel = s.label;
-          bestAct = () => {
-            if (s.id === "lookout") { cin.mode = "valley"; cin.t = 0; }
-            else hooks.onToast(s.label + " — press P to keep the moment.");
-          };
-        }
-      }
-    }
-    if (bestAct) prompt = { label: bestLabel, act: bestAct };
-  }
-
-  /* ---------- camera ---------- */
-  const camTarget = new THREE.Vector3();
-  const camDesired = new THREE.Vector3();
-  function updateCamera(dt: number) {
-    const p = player.root.position;
-    const headY = p.y + 1.6;
-    camTarget.set(p.x, headY, p.z);
-
-    /* cinematic: valley reveal */
-    let dist = 10.5, pitch = camPitch, yaw = camYaw;
-    let blend = 0;
-    if (cin.mode === "valley") {
-      cin.t += dt / 6.5;
-      if (cin.t >= 1) { cin.mode = ""; cin.t = 0; }
-      else {
-        const k = smooth(Math.min(1, cin.t * 1.4)) * (cin.t > 0.85 ? (1 - cin.t) / 0.15 : 1);
-        blend = k;
-        yaw = lerp(yaw, 1.25 + Math.PI + Math.sin(cin.t * Math.PI) * 0.55, k);
-        pitch = lerp(pitch, 0.3, k);
-        dist = lerp(dist, 12.5, k);
-        S.cinematic = k;
-      }
-    } else S.cinematic = 0;
-
-    if (S.intro && !S.free) {
-      yaw = 1.25 + Math.PI + 0.55 + sp * 1.6;
-      dist = 13;
-      pitch = 0.42;
-    }
-
-    const cp = Math.cos(pitch);
-    const off = new THREE.Vector3(Math.sin(yaw) * cp, Math.sin(pitch), Math.cos(yaw) * cp);
-    camDesired.copy(camTarget).addScaledVector(off, dist);
-    /* keep above terrain */
-    const th = heightAt(camDesired.x, camDesired.z);
-    if (camDesired.y < th + 0.8) camDesired.y = th + 0.8;
-    /* obstacle clamp */
-    for (const o of world.obstacles) {
-      const ox = camDesired.x - o.x, oz = camDesired.z - o.z;
-      const d2 = ox * ox + oz * oz;
-      const rr = o.r + 1.2;
-      if (d2 < rr * rr && Math.abs(camDesired.y - heightAt(o.x, o.z)) < 6) {
-        const d = Math.sqrt(d2) || 0.001;
-        camDesired.x = o.x + (ox / d) * rr;
-        camDesired.z = o.z + (oz / d) * rr;
-      }
-    }
-    const damp = 1 - Math.exp(-dt * (dragging ? 14 : 5.2));
-    camPos.lerp(camDesired, damp);
-    camera.position.copy(camPos);
-    tmpV.copy(camTarget);
-    tmpV.y += blend * 0.4;
-    camera.lookAt(tmpV);
-    void camTarget;
-  }
-
-  /* ---------- sky & light by hour ---------- */
-  const skyTop = new THREE.Color(), skyBot = new THREE.Color(), fogCol = new THREE.Color();
-  const DAY_TOP = new THREE.Color("#5f9fd0"), DAY_BOT = new THREE.Color("#dce8d8");
-  const GOLD_TOP = new THREE.Color("#4f6f9e"), GOLD_BOT = new THREE.Color("#f2b578");
-  const NIGHT_TOP = new THREE.Color("#0b1120"), NIGHT_BOT = new THREE.Color("#232f4a");
-  const RAIN_TOP = new THREE.Color("#7d8ea0"), RAIN_BOT = new THREE.Color("#b9c2c4");
-  const sunCol = new THREE.Color();
-
-  function updateEnvironment(dt: number, t: number) {
-    const h = S.time;
-    const el = Math.sin(((h - 6) / 12) * Math.PI);
-    const night = smooth(clamp((0.12 - el) / 0.3, 0, 1));
-    const dusk = clamp(1 - Math.abs(el - 0.08) / 0.2, 0, 1) * (1 - night);
-    S.night = night; S.dusk = dusk;
-
-    const rainy = S.weather !== "clear";
-    skyTop.copy(DAY_TOP).lerp(GOLD_TOP, dusk).lerp(NIGHT_TOP, night).lerp(RAIN_TOP, rainy ? 0.55 * (1 - night) : 0);
-    skyBot.copy(DAY_BOT).lerp(GOLD_BOT, dusk).lerp(NIGHT_BOT, night).lerp(RAIN_BOT, rainy ? 0.5 * (1 - night) : 0);
-    (world as any).skyUniforms.top.value.copy(skyTop);
-    (world as any).skyUniforms.bottom.value.copy(skyBot);
-    fogCol.copy(skyBot);
-    scene.fog!.color.copy(fogCol);
-    (scene.fog as THREE.Fog).near = rainy ? 50 : 70;
-    (scene.fog as THREE.Fog).far = rainy ? 260 : 360;
-
-    const p = player.root.position;
-    const az = ((h - 6) / 12) * Math.PI * 2 + Math.PI * 0.5;
-    const sel = Math.max(el, -0.25);
-    sun.position.set(p.x + Math.cos(az) * 120 * (sel > 0 ? 1 : 0.4), p.y + 30 + sel * 130, p.z + Math.sin(az) * 120);
-    sun.target.position.copy(p);
-    sun.intensity = Math.max(0, el) * 1.25 * (rainy ? 0.55 : 1) + dusk * 0.25;
-    sunCol.set("#fff4e0").lerp(new THREE.Color("#ffb066"), dusk).lerp(new THREE.Color("#ff8a5a"), dusk * 0.4);
-    sun.color.copy(sunCol);
-    moonLight.intensity = night * 0.22;
-    moonLight.position.set(p.x - 60, p.y + 80, p.z - 40);
-    moonLight.target = sun.target;
-    hemi.intensity = 0.28 + (1 - night) * 0.42 * (rainy ? 0.7 : 1);
-    hemi.color.copy(skyTop).lerp(new THREE.Color("#ffffff"), 0.35);
-    ambient.intensity = 0.1 + night * 0.06;
-
-    const sw = (world as any);
-    sw.sun.position.set(Math.cos(az) * 330, 20 + sel * 300, Math.sin(az) * 330);
-    (sw.sun.material as THREE.SpriteMaterial).opacity = clamp(1 - night * 1.4, 0, 1) * (rainy ? 0.35 : 1);
-    sw.moon.position.set(-Math.cos(az) * 300, 40 + night * 220, -Math.sin(az) * 300);
-    (sw.moon.material as THREE.SpriteMaterial).opacity = night * (rainy ? 0.3 : 0.9);
-
-    /* weather blends */
-    S.wet = lerp(S.wet, S.weather === "rain" ? 1 : 0, dt * 0.5);
-    if (S.season !== "winter" && S.weather === "snow") S.snow = lerp(S.snow, 0.35, dt * 0.3);
-    else S.snow = lerp(S.snow, S.season === "winter" ? 1 : 0, dt * 0.5);
-
-    world.update(dt, t, night, dusk);
-  }
-
-  /* ---------- audio mix ---------- */
-  function updateAudio() {
-    const p = player.root.position;
-    const rd = Math.abs(p.x - riverX(p.z));
-    const forest = clamp(1 - dist2(p.x, p.z, -50, -80) / 40, 0, 1) + clamp(1 - dist2(p.x, p.z, -28, -104) / 45, 0, 1);
-    const village = clamp(1 - Math.sqrt(p.x * p.x + p.z * p.z) / 65, 0, 1);
-    const train = ent.train.visible ? clamp(1 - Math.abs(ent.train.position.x - p.x) / 150, 0, 1) : 0;
-    audio.update({ river: clamp(1 - rd / 26, 0, 1), forest: clamp(forest, 0, 1), village, rain: S.weather === "rain" ? 1 : 0, train });
-  }
-
-  /* ---------- captions ---------- */
-  function currentCaption(): UIState["caption"] {
-    let cap: UIState["caption"] = null;
+    let cap = -1;
     for (let i = 0; i < CAPTIONS.length; i++) {
-      const start = CAPTIONS[i][0];
-      const d = sp - start;
-      if (d >= 0 && d < 0.055) {
-        const o = d < 0.012 ? d / 0.012 : d > 0.04 ? (0.055 - d) / 0.015 : 1;
-        cap = { title: CAPTIONS[i][1], sub: CAPTIONS[i][2], o: clamp(o, 0, 1) };
-        if (i > 0 || true) break;
-      }
+      if (S.t >= CAPTIONS[i][0] && S.t <= CAPTIONS[i][1]) { cap = i; break; }
     }
-    return cap;
-  }
-
-  function pushUI() {
-    const p = player.root.position;
-    let carrying: string | null = null;
-    if (S.questBread === 1) carrying = "Warm anpan for Kenji";
-    if (S.questUmbrella === 1) carrying = "Aiko's red umbrella";
-    let questHint: string | null = null;
-    if (S.questBread === 1) questHint = "Kenji is in the rice terraces, south of the square";
-    else if (S.questUmbrella === 0 && S.rep === 0 && S.time > 8) questHint = "Aiko sits by her gate on the residential lane — say hello";
-    else if (S.questUmbrella === 1) questHint = "Return the umbrella to Aiko";
-    hooks.onUI({
-      time: hourLabel(S.time), phase: dayPhase(S.time), season: S.season, weather: S.weather,
-      rep: S.rep, memories: S.memories.length, totalMemories: MEMORIES.length,
-      prompt: prompt?.label ?? null,
-      dialogue: dialog ? {
-        name: ent.npcs[dialog.npcIdx].def.name,
-        role: ent.npcs[dialog.npcIdx].def.role,
-        text: dialog.pages[dialog.page],
-        last: dialog.page >= dialog.pages.length - 1,
-      } : null,
-      caption: currentCaption(),
-      festival: S.festivalOn, intro: S.intro && !S.free,
-      carrying, questHint, audioOn: audio.enabled, journalOpen,
-    });
-    void p;
-  }
-
-  /* ---------- main loop ---------- */
-  const clock = new THREE.Clock();
-  let raf = 0;
-  function frame() {
-    if (disposed) return;
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(clock.getDelta(), 0.05);
-    const t = clock.elapsedTime;
-    S.clock += dt;
-
-    /* scroll → time */
-    const doc = document.documentElement;
-    const max = Math.max(1, doc.scrollHeight - window.innerHeight);
-    const target = clamp(window.scrollY / max, 0, 1);
-    sp = lerp(sp, target, 1 - Math.exp(-dt * 3.2));
-    S.progress = sp;
-    S.time = 6.0 + sp * 16.0;
-
-    /* festival logic */
-    const wantFestival = S.season === "summer" && S.time > 19 && S.time < 21.8;
-    if (wantFestival && !S.festivalOn) {
-      world.setFestival(true);
-      if (!seenCin.festival) { seenCin.festival = true; hooks.onToast("Paper lanterns bloom over the square — festival night", "info"); }
-    } else if (!wantFestival && S.festivalOn) world.setFestival(false);
-
-    /* intro guidance */
-    const input = { x: 0, z: 0, run: !!keys.shift || keys.ShiftLeft === true, sit: false };
-    let ix = 0, iz = 0;
-    if (keys.KeyW || keys.ArrowUp) iz += 1;
-    if (keys.KeyS || keys.ArrowDown) iz -= 1;
-    if (keys.KeyA || keys.ArrowLeft) ix -= 1;
-    if (keys.KeyD || keys.ArrowRight) ix += 1;
-
-    if (sitBench) {
-      input.sit = true;
-    } else if (!dialog && (ix !== 0 || iz !== 0)) {
-      const cp = Math.cos(camYaw), sn = Math.sin(camYaw);
-      const fx = -sn, fz = -cp, rx = cp, rz = -sn;
-      let wx = fx * iz + rx * ix, wz = fz * iz + rz * ix;
-      const wl = Math.sqrt(wx * wx + wz * wz) || 1;
-      input.x = wx / wl; input.z = wz / wl;
-      moveTarget = null;
-    } else if (!dialog && moveTarget) {
-      const p = player.root.position;
-      const dx = moveTarget.x - p.x, dz = moveTarget.z - p.z;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      if (d < 0.7) moveTarget = null;
-      else { input.x = dx / d; input.z = dz / d; }
-    } else if (!dialog && S.intro && !S.free) {
-      /* guided walk down the hill, driven by scroll */
-      const k = clamp(sp / INTRO_END, 0, 1);
-      const seg = k * (INTRO_PATH.length - 1);
-      const i0 = Math.floor(seg), i1 = Math.min(INTRO_PATH.length - 1, i0 + 1);
-      const f = seg - i0;
-      const gx = lerp(INTRO_PATH[i0][0], INTRO_PATH[i1][0], f);
-      const gz = lerp(INTRO_PATH[i0][1], INTRO_PATH[i1][1], f);
-      const p = player.root.position;
-      const dx = gx - p.x, dz = gz - p.z;
-      const d = Math.sqrt(dx * dx + dz * dz);
-      if (d > 1.1) { input.x = dx / d; input.z = dz / d; input.run = d > 9; }
-      if (sp >= INTRO_END + 0.01) { S.intro = false; S.free = true; }
+    if (cap !== this.lastCaption) {
+      this.lastCaption = cap;
+      this.hooks.onCaption(cap);
     }
-    if (dialog) { input.x = 0; input.z = 0; }
-
-    const speed = ent.update(dt, t, input, S.night);
-    void speed;
-
-    /* cinematic triggers */
-    const p = player.root.position;
-    if (!seenCin.valley && p.x > -108 && p.x < -99 && p.z > -34 && p.z < -26) {
-      seenCin.valley = true;
-      cin.mode = "valley"; cin.t = 0;
-      hooks.onToast("The lookout — the whole valley fits in one breath", "info");
-    }
-    if (S.season === "spring" && !S.intro) {
-      gustT -= dt;
-      if (gustT < 0) {
-        gustT = 18 + Math.random() * 14;
-        let near = false;
-        for (const [cx, cz] of [[8, -15], [-6, -26], [-14, -62], [-33, -78], [118, 4], [62, 24], [-70, 44], [30, -52]] as [number, number][]) {
-          if (dist2(p.x, p.z, cx, cz) < 9) { near = true; ent.pools.petal.burst(cx, heightAt(cx, cz) + 4, cz, 90, 2.2, 6); }
-        }
-        if (near) { S.wind = 1.6; if (!S.memories.includes("blossom")) hooks.onToast("A gust of blossoms — the whole canopy lets go", "info"); }
-        else S.wind = 0.9;
-      }
-    }
-    S.wind = lerp(S.wind, 0.5 + (S.weather === "rain" ? 0.4 : 0), dt * 0.4);
-
-    updateEnvironment(dt, t);
-    updateCamera(dt);
-    scanInteractions();
-    updateAudio();
-
-    uiT -= dt;
-    if (uiT < 0) { uiT = 0.12; pushUI(); }
-
-    renderer.render(scene, camera);
-  }
-  frame();
-  pushUI();
-
-  /* ---------- public api ---------- */
-  const api = {
-    setSeason(s: Season) {
-      S.season = s;
-      world.setSeason(s);
-      audio.uiTap();
-      if (s === "winter" && !seenCin.firstSnow) {
-        seenCin.firstSnow = true;
-        hooks.onToast("Snow begins — the village puts on its white coat", "info");
-        addMemory("snow");
-      }
-      if (s === "summer" && S.time > 19) world.setFestival(true);
-      pushUI();
-    },
-    setWeather(w: Weather) {
-      S.weather = w;
-      audio.uiTap();
-      if (w === "rain") hooks.onToast("Rain on the tiles — the village smells of cedar");
-      if (w === "snow") hooks.onToast("Soft snow begins to fall");
-      if (w === "clear") hooks.onToast("The sky clears over Hinomori");
-      pushUI();
-    },
-    toggleAudio() {
-      audio.ensure();
-      audio.setEnabled(!audio.enabled);
-      pushUI();
-    },
-    toggleJournal() {
-      journalOpen = !journalOpen;
-      audio.uiTap();
-      pushUI();
-    },
-    interact: doInteract,
-    photo: takePhoto,
-    begin() { audio.ensure(); },
-    state: S,
+    if (this.clock > 0.05 && this.clock - dt <= 0.05) this.hooks.onReady();
   };
 
-  function dispose() {
-    disposed = true;
-    cancelAnimationFrame(raf);
-    window.removeEventListener("keydown", kd);
-    window.removeEventListener("keyup", ku);
-    window.removeEventListener("scroll", onScroll);
-    window.removeEventListener("resize", onResize);
-    el.removeEventListener("pointerdown", pd);
-    el.removeEventListener("pointermove", pm);
-    el.removeEventListener("pointerup", pu);
-    renderer.dispose();
-    if (renderer.domElement.parentElement === container) container.removeChild(renderer.domElement);
+  dispose() {
+    this.disposed = true;
+    cancelAnimationFrame(this.raf);
+    window.removeEventListener("resize", this.onResize);
+    window.removeEventListener("pointermove", this.onPointer);
+    this.renderer.dispose();
   }
-
-  return { api, dispose };
 }
-
-export type GameAPI = ReturnType<typeof createGame>["api"];
-export type { Rig };
